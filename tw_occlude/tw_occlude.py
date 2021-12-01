@@ -53,18 +53,19 @@ def main(options):
 
       # Do the image manipulation
       # Resize the image to 40% of the src size
-      _, src_height = src_image.size
+      src_width, src_height = src_image.size
       _, tw_height = tw_image.size
       new_size = int(tw_height * 70 / (tw_height * 100 / src_height))
       tw_image = tw_image.resize((new_size, new_size))
+      # Calculate the optimal placement, x is inverted for left to right ear
+      x = int(src_width / 3 - new_size / 2)
+      y = int(src_height * 1.5 / 3 - new_size / 2)
+      placement = (x, y)
       # Place the TW image on the src
-      src_image.paste(tw_image, (0, 0), tw_image)
+      src_image.paste(tw_image, placement, tw_image)
 
       # Save the modified image
       src_image.save(str(src_image_path))
-
-
-
 
 
 if __name__ == "__main__":

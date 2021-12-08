@@ -6,9 +6,22 @@ Python script to occlude ear images with Truly Wireless headphones (hopefully qu
 import os
 import shutil
 import random
+import json
 from optparse import OptionParser
 from pathlib import PurePath
 from PIL import Image
+
+def side(annotations, src_image_path):
+  if annotations == "L":
+    # Access the cropped image for the left ear
+    return 0
+  elif annotations == "R":
+    # Access the cropped image for the left ear
+    return 1
+  elif annotations:
+    NotImplementedError()
+
+
 
 def main(options):
   # Prepare the input and output paths
@@ -20,6 +33,8 @@ def main(options):
     count += 1
   output_path = PurePath(output_path, input_path.name + str(count))
 
+  """
+  Old Code
   # Prepare the list of TW images to later access randomly
   if options.random_seed:
     random.seed(options.random_seed)
@@ -27,6 +42,14 @@ def main(options):
   for path, _, files in os.walk(tw_path):
     for name in files:
       tw_image_paths.append(PurePath(path, name))
+  # Number of TW images
+  tw_images = len(tw_image_paths)
+  """
+
+  # Read the tw images definitions
+  tw_file = open(PurePath(tw_path, "definitions.json"))
+  tw_definitions = json.load(tw_file)
+  tw_image_paths = [(PurePath(tw_path, tw_definition["cropped_path_left"]), PurePath(tw_path, tw_definition["cropped_path_right"])) for tw_definition in tw_definitions["images"]]
   # Number of TW images
   tw_images = len(tw_image_paths)
 
@@ -45,7 +68,7 @@ def main(options):
       # Check if the file is an image
       if src_image_path.suffix not in [".png", ".jpg", ".jpeg"]:
         continue
-      tw_image_path = tw_image_paths[random.randrange(0, tw_images)]
+      tw_image_path = tw_image_paths[random.randrange(0, tw_images)][side(options.annotations, src_image_path)]
 
       # Load the images
       src_image = Image.open(str(src_image_path))
@@ -73,12 +96,13 @@ if __name__ == "__main__":
   usage = "usage: %prog [options] arguments"
   parser = OptionParser()
   parser.add_option("-i", "--input-dir", dest = "input_dir", help = "The path to the ear dataset directory.")
+  parser.add_option("-a", "--annotations", dest = "annotations", help = "The mode of handling left and right ears in the ear dataset (L, R, <annotation_filename>).")
   parser.add_option("-o", "--output-dir", dest = "output_dir", help = "The path to the directory to save the modified dataset.")
   parser.add_option("-t", "--tw-dir", dest = "tw_dir", help = "The path to the directory that stores the Truly Wirelles headphone images.")
   parser.add_option("-r", "--random-seed", dest = "random_seed", type = "int", help = "The seed to be used in the random function, if you wish to get repeatable results.")
   (options, args) = parser.parse_args()
 
-  if not options.input_dir or not options.output_dir or not options.tw_dir:
-    parser.error("The input directory (-i), output directory (-o) and tw directory (-t) are required.")
+  if not options.input_dir or not options.annotations or not options.output_dir or not options.tw_dir:
+    parser.error("The input directory (-i), annotations (-a), output directory (-o) and tw directory (-t) are required.")
   
   main(options)

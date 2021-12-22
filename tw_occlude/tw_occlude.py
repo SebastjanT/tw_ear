@@ -7,9 +7,10 @@ import os
 import shutil
 import random
 import json
+import cv2
+import numpy as np
 from optparse import OptionParser
 from pathlib import PurePath
-from PIL import Image
 
 def side(annotations, src_image_path):
   if annotations == "L":
@@ -20,6 +21,45 @@ def side(annotations, src_image_path):
     return 1
   elif annotations:
     NotImplementedError()
+
+
+def sharpness_correction(src_image, tw_image):
+  # Calculate the mean sharpness in the source image
+  src_image_gray = cv2.cvtColor(src_image, cv2.COLOR_RGB2GRAY)
+  src_laplacian = cv2.Laplacian(src_image_gray, cv2.CV_64F)
+  _, sigma = cv2.meanStdDev(src_laplacian)
+
+  sharpness_value = sigma[0][0] ** 2
+  #print("Original src:", sharpness_value)
+
+  # Blur untill the tw_image is around the same or lower sharpness
+  tw_image_gray = cv2.cvtColor(tw_image, cv2.COLOR_RGB2GRAY)
+  tw_laplacian = cv2.Laplacian(tw_image_gray, cv2.CV_64F)
+  _, sigma = cv2.meanStdDev(tw_laplacian)
+
+  tw_corrected_sharpness = sigma[0][0] ** 2
+  #print("Original tw:", tw_corrected_sharpness)
+  #    
+  ## Show the image
+  #cv2.imshow("tw_image", tw_image)
+  #cv2.waitKey()
+  
+  while tw_corrected_sharpness > sharpness_value / 2:
+    #tw_image = cv2.blur(tw_image, (3, 3))
+    tw_image = cv2.GaussianBlur(tw_image, (3, 3), 0)
+
+    tw_image_gray = cv2.cvtColor(tw_image, cv2.COLOR_RGB2GRAY)
+    tw_laplacian = cv2.Laplacian(tw_image_gray, cv2.CV_64F)
+    _, sigma = cv2.meanStdDev(tw_laplacian)
+
+    tw_corrected_sharpness = sigma[0][0] ** 2
+    #print("Correction step:", tw_corrected_sharpness)
+
+    ## Show the image
+    #cv2.imshow("tw_image blurred", tw_image)
+    #cv2.waitKey()
+
+  return tw_image
 
 
 
@@ -71,26 +111,51 @@ def main(options):
       tw_image_path = tw_image_paths[random.randrange(0, tw_images)][side(options.annotations, src_image_path)]
 
       # Load the images
-      src_image = Image.open(str(src_image_path))
-      tw_image = Image.open(str(tw_image_path))
+      src_image = cv2.imread(str(src_image_path), cv2.IMREAD_UNCHANGED)
+      tw_image = cv2.imread(str(tw_image_path), cv2.IMREAD_UNCHANGED)
 
       # Do the image manipulation
       # Resize the image to 40% of the src size
-      src_width, src_height = src_image.size
-      _, tw_height = tw_image.size
+      src_height, src_width, _ = src_image.shape
+      tw_height, *_ = tw_image.shape
+      
+      # Calculate the average sharpness and blur the tw_image to match
+      tw_image = sharpness_correction(cv2.resize(src_image, (tw_height, tw_height)), tw_image)
+
+      # Resize the blurred image
       new_size = int(tw_height * 80 / (tw_height * 100 / src_height))
-      tw_image = tw_image.resize((new_size, new_size))
+      tw_image = cv2.resize(tw_image, (new_size, new_size))
+
+      # Pad the image for compositing
+      src_image = cv2.copyMakeBorder(src_image, new_size, new_size, new_size, new_size, cv2.BORDER_CONSTANT)
+
       # Calculate the optimal placement, x is inverted for left to right ear
       x = int(src_width / 3 - new_size / 2)
       if (options.annotations == "R"):
         x = int(1.8 * src_width / 3 - new_size / 2)
       y = int(src_height * 1.7 / 3 - new_size / 2)
-      placement = (x, y)
+      
+      # Account for the padding
+      x += new_size
+      y += new_size
+
+      # Calculate the alpha channel
+      alpha_tw_image = tw_image[:, :, 3] / 255
+
       # Place the TW image on the src
-      src_image.paste(tw_image, placement, tw_image)
+      for colour in range(3):
+        # Mask
+        src_image[y:y+new_size, x:x+new_size, colour] = alpha_tw_image * tw_image[:, :, colour] + (1 - alpha_tw_image) * src_image[y:y+new_size, x:x+new_size, colour]
+
+      # Crop the padding away
+      src_image = src_image[new_size:-new_size, new_size:-new_size]
+
+      ## Show the image
+      #cv2.imshow("Output", src_image)
+      #cv2.waitKey()
 
       # Save the modified image
-      src_image.save(str(src_image_path))
+      cv2.imwrite(str(src_image_path), src_image)
 
 
 

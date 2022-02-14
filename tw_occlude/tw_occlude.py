@@ -41,8 +41,12 @@ def sharpness_correction(src_image, tw_image):
   #print("Original tw:", tw_corrected_sharpness)
   #    
   ## Show the image
+  #cv2.imshow("src_image", src_image)
   #cv2.imshow("tw_image", tw_image)
   #cv2.waitKey()
+  
+  # Do an initial blur for better result
+  tw_image = cv2.GaussianBlur(tw_image, (3, 3), 0)
   
   while tw_corrected_sharpness > sharpness_value / 2:
     #tw_image = cv2.blur(tw_image, (3, 3))
@@ -60,6 +64,134 @@ def sharpness_correction(src_image, tw_image):
     #cv2.waitKey()
 
   return tw_image
+
+def sb_correction(src_image, tw_image):
+  # Calculate the mean and standard deviation of src_image
+  src_image_hsv = cv2.cvtColor(src_image, cv2.COLOR_RGB2HSV)
+
+  src_mean, src_std_dev = cv2.meanStdDev(src_image_hsv)
+
+  # Calculate the mean and standard deviation of tw_image
+  tw_image_hsv = cv2.cvtColor(tw_image, cv2.COLOR_RGB2HSV).astype(np.float64)
+
+  tw_mean, tw_std_dev = cv2.meanStdDev(tw_image_hsv)
+
+  # Do the brightness and saturation modification based on this - need to find the original paper (https://www.pyimagesearch.com/2014/06/30/super-fast-color-transfer-images/)
+
+  # Split the tw_image_hsv
+  tw_h, tw_s, tw_v = cv2.split(tw_image_hsv)
+
+  # Subtract difference of mean/std_dev of brightness
+  tw_v -= src_mean[2] / src_std_dev[2] - tw_mean[2] / tw_std_dev[2]
+
+  # Scale brightness by the standard deviation
+  #tw_v *= src_std_dev[2] / tw_std_dev[2]
+  
+  # Add src image mean
+  #tw_v += src_mean[2]
+
+  # Subtract difference of mean/std_deviation of saturation
+  #tw_s -= src_mean[1] / src_std_dev[1] - tw_mean[1] / tw_std_dev[1]
+  tw_s -= src_mean[1] - tw_mean[1]
+
+  # Clip the values
+  tw_s = np.clip(tw_s, 0, 255)
+  tw_v = np.clip(tw_v, 0, 255)
+
+
+  tw_image_hsv = cv2.merge([tw_h, tw_s, tw_v])
+  
+  output_tw_image = cv2.cvtColor(tw_image_hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+  output_tw_image = cv2.cvtColor(output_tw_image, cv2.COLOR_RGB2RGBA)
+  
+  #Visualization
+  #cv2.imshow("Source", src_image)
+  #cv2.imshow("Original", tw_image)
+  #cv2.imshow("Test", output_tw_image)
+  #cv2.waitKey()
+
+  # Add back the alpha channel
+  output_tw_image[:, :, 3] = tw_image[:, :, 3]
+
+  return output_tw_image
+
+def ypr_correction(tw_image, tw_height, src_image_path, output_path):
+  # Prepare the paths
+  avg_ear_path = PurePath(output_path, "avg_lds.pts")
+  src_landmarks_path = src_image_path.with_suffix(".pts")
+  # Check if .pts annotations exists
+  if not os.path.exists(avg_ear_path) or not os.path.exists(src_landmarks_path):
+    return tw_image
+  
+  # Read in the avg_ear landmarks
+  # Read the pts file
+  avg_ear = np.loadtxt(str(avg_ear_path), comments = ("version:", "n_points:", "{", "}")).astype(np.float32)
+  
+  # Read in the src_image landmarks
+  # Read the pts file
+  src_landmarks = np.loadtxt(str(src_landmarks_path), comments = ("version:", "n_points:", "{", "}")).astype(np.float32)
+      
+  # Resize the tw_image
+  new_size = int(tw_height * 80 / (tw_height * 100 / 256))
+  tw_image = cv2.resize(tw_image, (new_size, new_size))
+
+  avg_ear_image = np.zeros((265, 265, 4), dtype = np.uint8)
+
+  # Reshape avg landmarks to the current source image size
+  #for i, (landmark_x, landmark_y) in enumerate(avg_ear):
+  #  landmark_x *= src_width / 256
+  #  landmark_y *= src_height / 256
+  #  avg_ear[i] = np.array([landmark_x, landmark_y])
+
+  # Pad the image for compositing
+  avg_ear_image = cv2.copyMakeBorder(avg_ear_image, new_size, new_size, new_size, new_size, cv2.BORDER_CONSTANT)
+
+  # Position the tw_image to the right location
+  x = int(avg_ear[44][0] - new_size / 3)
+  y = int(avg_ear[44][1] - new_size / 2)
+  
+  # Account for the padding
+  x += new_size
+  y += new_size
+  
+  # Place the image
+  avg_ear_image[y:y+new_size, x:x+new_size, :] = tw_image[:, :, :]
+  
+  # Crop the padding away
+  avg_ear_image = avg_ear_image[new_size:-new_size, new_size:-new_size]
+  
+  ## Visualization avg_ear
+  #for landmark in avg_ear:
+  #  cv2.drawMarker(avg_ear_image, landmark.astype(np.uint64), (0, 0, 255))
+  
+  ## Show the image with landmarks
+  #cv2.imshow("avg_ear_image", avg_ear_image)
+  #cv2.waitKey()
+  
+  ## Visualization src_landmarks
+  #show_copy = avg_ear_image.copy()
+  #for landmark in src_landmarks:
+  #  cv2.drawMarker(show_copy, landmark.astype(np.uint64), (255, 0, 0))
+  
+  ## Show the image with src_landmarks
+  #cv2.imshow("avg_ear_image_src", show_copy)
+  #cv2.waitKey()
+  
+  # Get the warp matrix
+  warp_matrix = cv2.estimateAffine2D(avg_ear, src_landmarks, ransacReprojThreshold = np.Inf)[0]
+
+  warp_tw_image = cv2.warpAffine(avg_ear_image, warp_matrix, (avg_ear_image.shape[1], avg_ear_image.shape[0]))
+  
+  ## Visualization src_landmarks
+  #show_copy = warp_tw_image.copy()
+  #for landmark in src_landmarks:
+  #  cv2.drawMarker(show_copy, landmark.astype(np.uint64), (255, 0, 0))
+  
+  ## Show the warped image
+  #cv2.imshow("Warped tw_image", show_copy)
+  #cv2.waitKey()
+
+  return warp_tw_image
 
 
 
@@ -115,16 +247,26 @@ def main(options):
       tw_image = cv2.imread(str(tw_image_path), cv2.IMREAD_UNCHANGED)
 
       # Do the image manipulation
-      # Resize the image to 40% of the src size
       src_height, src_width, _ = src_image.shape
       tw_height, *_ = tw_image.shape
+
+      ## Visualize
+      #cv2.imshow("src_image", src_image)
       
       # Calculate the average sharpness and blur the tw_image to match
       tw_image = sharpness_correction(cv2.resize(src_image, (tw_height, tw_height)), tw_image)
+      
+      # Calculate the average birghtness and match to match
+      tw_image = sb_correction(cv2.resize(src_image, (tw_height, tw_height)), tw_image)
 
-      # Resize the blurred image
-      new_size = int(tw_height * 80 / (tw_height * 100 / src_height))
+      # Apply the affine transformation to correct for yaw, pitch and roll
+      tw_image = ypr_correction(tw_image, tw_height, src_image_path, output_path)
+  
+      # Get the new tw_image size and resize to fit ear image
+      tw_height, *_ = tw_image.shape
+      new_size = int(tw_height * 100 / (tw_height * 100 / max(src_height, src_width)))
       tw_image = cv2.resize(tw_image, (new_size, new_size))
+
 
       # Pad the image for compositing
       src_image = cv2.copyMakeBorder(src_image, new_size, new_size, new_size, new_size, cv2.BORDER_CONSTANT)
@@ -166,7 +308,7 @@ if __name__ == "__main__":
   parser.add_option("-i", "--input-dir", dest = "input_dir", help = "The path to the ear dataset directory.")
   parser.add_option("-a", "--annotations", dest = "annotations", help = "The mode of handling left and right ears in the ear dataset (L, R, <annotation_filename>).")
   parser.add_option("-o", "--output-dir", dest = "output_dir", help = "The path to the directory to save the modified dataset.")
-  parser.add_option("-t", "--tw-dir", dest = "tw_dir", help = "The path to the directory that stores the Truly Wirelles headphone images.")
+  parser.add_option("-t", "--tw-dir", dest = "tw_dir", help = "The path to the directory that stores the Truly Wireless earphones images.")
   parser.add_option("-r", "--random-seed", dest = "random_seed", type = "int", help = "The seed to be used in the random function, if you wish to get repeatable results.")
   (options, args) = parser.parse_args()
 

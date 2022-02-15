@@ -308,7 +308,7 @@ if __name__ == "__main__":
   parser.add_option("-i", "--input-dir", dest = "input_dir", help = "The path to the ear dataset directory.")
   parser.add_option("-a", "--annotations", dest = "annotations", help = "The mode of handling left and right ears in the ear dataset (L, R, <annotation_filename>).")
   parser.add_option("-o", "--output-dir", dest = "output_dir", help = "The path to the directory to save the modified dataset.")
-  parser.add_option("-t", "--tw-dir", dest = "tw_dir", help = "The path to the directory that stores the Truly Wireless earphones images.")
+  parser.add_option("-t", "--tw-dir", dest = "tw_dir", help = "The path to the directory that stores the Truly Wireless earbud images.")
   parser.add_option("-r", "--random-seed", dest = "random_seed", type = "int", help = "The seed to be used in the random function, if you wish to get repeatable results.")
   (options, args) = parser.parse_args()
 
